@@ -21,7 +21,7 @@ Two halves, deliberately separated:
 ┌──────────────────────── GitHub Actions (daily cron + manual dispatch) ────────────────────────┐
 │                                                                                                │
 │  Sources ──▶ Fetch ──▶ Dedup ──▶ Extract full text ──▶ Summarize + categorize ──▶ Retention   │
-│  (RSS,       (per-     (exact,   (readability, with     (Gemini Flash, rate-      (prune old   │
+│  (RSS,       (per-     (exact,   (readability, with     (Gemini Flash-Lite,       (prune old   │
 │   Reddit,     source    unique    graceful fallback      limited, daily budget)     raw text)   │
 │   later HN)   modules)  constr.)  to excerpt)                                                   │
 │                                        │                                                       │
@@ -97,7 +97,7 @@ The starting feed/subreddit list lives in the `sources` table (seeded by a scrip
 
 ## 5. Summarization Layer (AI)
 
-- **Gemini API free tier (Flash model)** — no cost. Kept behind a small `summarize()` interface so the provider can be swapped if the free tier changes.
+- **Gemini API free tier (Flash-Lite model)** — no cost. After Google's Dec 2025 quota cuts, `gemini-2.5-flash-lite` (15 RPM / 1,000 req/day free) is the only free model with a workable daily quota — full Flash is down to 20/day. Kept behind a small `summarize()` interface so the provider can be swapped if the free tier changes again.
 - One structured call per item returns **summary + category + tags** together (categories are assigned here — see §6; the model picks from a fixed configured list, with an "Other" fallback).
 - **Rate limiting is designed in, not bolted on:** the pipeline sleeps between calls to stay under the free tier's requests-per-minute limit, caps items per run, and enforces a daily request budget in code so a bug can't burn the day's quota (free-tier daily caps are real, and a lockout lasts until midnight Pacific).
 - Summarization is a **separate phase from fetching**: items are stored raw first, then a "summarize up to K unsummarized items" loop runs. A partial failure never loses fetched data.

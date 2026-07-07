@@ -53,19 +53,37 @@ async function rateLimit(): Promise<void> {
   lastCallAt = Date.now();
 }
 
+const MAX_RETRIES = 3;
+
 async function generate(prompt: string, jsonSchema?: object): Promise<string> {
-  await consumeBudget();
-  await rateLimit();
-  const res = await getClient().models.generateContent({
-    model: GEMINI_MODEL,
-    contents: prompt,
-    config: jsonSchema
-      ? { responseMimeType: "application/json", responseSchema: jsonSchema }
-      : undefined,
-  });
-  const text = res.text;
-  if (!text) throw new Error("empty Gemini response");
-  return text;
+  for (let attempt = 0; ; attempt++) {
+    await consumeBudget();
+    await rateLimit();
+    try {
+      const res = await getClient().models.generateContent({
+        model: GEMINI_MODEL,
+        contents: prompt,
+        config: jsonSchema
+          ? { responseMimeType: "application/json", responseSchema: jsonSchema }
+          : undefined,
+      });
+      const text = res.text;
+      if (!text) throw new Error("empty Gemini response");
+      return text;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Daily quota exhausted -> stop the whole batch, don't retry per item.
+      if (msg.includes("PerDay")) throw new BudgetExceededError();
+      const isRateLimited = msg.includes("RESOURCE_EXHAUSTED") || msg.includes("429");
+      if (!isRateLimited || attempt >= MAX_RETRIES) throw e;
+      // Per-minute limit hit: honor Google's suggested retry delay if present.
+      const suggested = msg.match(/retry in ([\d.]+)s/i);
+      const delayMs = suggested
+        ? Math.ceil(Number(suggested[1]) * 1000) + 1000
+        : 15_000 * (attempt + 1);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
 }
 
 // ---- summarize + categorize (one structured call per item) ----
