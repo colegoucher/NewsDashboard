@@ -1,15 +1,6 @@
-// Product-level knobs live here so adding a category or tuning behavior
-// never requires touching pipeline or UI logic.
-
-export const CATEGORIES = [
-  "Programming",
-  "AI & ML",
-  "Tech News",
-  "World News",
-  "Other",
-] as const;
-
-export type Category = (typeof CATEGORIES)[number];
+// Product-level knobs live here so tuning behavior never requires touching
+// pipeline or UI logic. (Categories moved to src/lib/categories.ts — they're
+// DB-backed now so topics can be added from the UI.)
 
 // How long full article text is kept before being pruned (saved items exempt).
 export const RAW_CONTENT_RETENTION_DAYS = 30;

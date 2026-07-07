@@ -1,5 +1,6 @@
 import { ItemCard } from "@/components/item-card";
 import { Nav } from "@/components/nav";
+import { AddTopic } from "@/components/add-topic";
 import { AiPicksSection } from "@/components/ai-picks";
 import { SourceSuggestions } from "@/components/source-suggestions";
 import { getDiscoverCandidates } from "@/lib/queries";
@@ -31,6 +32,7 @@ export default async function DiscoverPage() {
     <>
       <Nav active="discover" />
       <main className="mx-auto max-w-3xl px-4 py-6">
+        <AddTopic />
         <SourceSuggestions suggestions={sourceSuggestions} />
         <AiPicksSection hasPicks={aiPicks.length > 0}>
           {aiPicks.map(({ item, reason }) => (

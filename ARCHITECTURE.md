@@ -75,6 +75,8 @@ The starting feed/subreddit list lives in the `sources` table (seeded by a scrip
 
 **Organic source discovery:** aggregator sources (HN, Reddit) surface articles from sites we don't follow. When a site's articles keep earning upvotes/saves, Discover suggests promoting it — one click auto-detects the site's RSS feed and adds it as a full source. The follow list grows from evidence, not manual curation.
 
+**Topics (cross-site categories):** "Add a topic" on Discover creates a category (DB-backed list the summarizer reads at runtime) plus a `googlenews` source — Google News search RSS for that query, which aggregates matching articles from any outlet on the web. Google News links are JS redirect pages, so the module best-effort decodes the real article URL from the base64 id; when that fails, extraction degrades to excerpt as usual. Topic + vote history + source suggestions compose: outlets that keep winning inside a topic get offered as direct follows.
+
 ---
 
 ## 4. Fetch, Dedup & Extraction

@@ -5,11 +5,11 @@ import { db } from "@/db";
 import { settings } from "@/db/schema";
 import {
   BATCH_CONTENT_CHARS,
-  CATEGORIES,
   GEMINI_DAILY_BUDGET,
   GEMINI_MAX_RPM,
   GEMINI_MODELS,
 } from "./config";
+import { getCategories } from "./categories";
 
 // All Gemini access goes through this module: one place for rate limiting,
 // the daily budget, the model fallback chain, and provider swap if the free
@@ -154,9 +154,10 @@ const batchSchema = z.object({
 export async function summarizeBatch(
   articles: BatchArticle[]
 ): Promise<Map<number, SummarizeResult>> {
+  const categories = await getCategories();
   const prompt = [
     `Below are ${articles.length} articles for a personal news dashboard. For EACH article, produce a summary that is the primary reading experience — it should let the reader fully absorb the story without clicking through.`,
-    `Per article return: its "id" exactly as given; a summary of 2-4 tight paragraphs of plain prose (no headers; lead with the core news); exactly one category from this list: ${CATEGORIES.join(", ")}; and 1-4 short topical tags (lowercase, e.g. "rust", "openai", "chips").`,
+    `Per article return: its "id" exactly as given; a summary of 2-4 tight paragraphs of plain prose (no headers; lead with the core news); exactly one category from this list: ${categories.join(", ")}; and 1-4 short topical tags (lowercase, e.g. "rust", "openai", "chips").`,
     `Articles marked EXCERPT-ONLY had incomplete text available: summarize only what is present, proportionally shorter, without inventing details.`,
     ``,
     ...articles.map((a) =>
@@ -180,7 +181,7 @@ export async function summarizeBatch(
           properties: {
             id: { type: "number" },
             summary: { type: "string" },
-            category: { type: "string", enum: [...CATEGORIES] },
+            category: { type: "string", enum: categories },
             tags: { type: "array", items: { type: "string" } },
           },
           required: ["id", "summary", "category", "tags"],
@@ -196,7 +197,7 @@ export async function summarizeBatch(
     if (!knownIds.has(r.id)) continue;
     out.set(r.id, {
       summary: r.summary,
-      category: (CATEGORIES as readonly string[]).includes(r.category) ? r.category : "Other",
+      category: categories.includes(r.category) ? r.category : "Other",
       tags: r.tags.slice(0, 4),
     });
   }
