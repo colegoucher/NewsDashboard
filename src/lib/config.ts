@@ -13,10 +13,12 @@ export const FEED_WINDOW_DAYS = 14;
 // call) and models are tried in a fallback chain (quotas are per-model).
 export const GEMINI_MAX_RPM = Number(process.env.GEMINI_MAX_RPM ?? 10);
 export const GEMINI_DAILY_BUDGET = Number(process.env.GEMINI_DAILY_BUDGET ?? 300);
+// Quality-first: the smarter model summarizes the first batches of the day,
+// then the chain degrades to lighter models as each daily quota runs out.
 export const GEMINI_MODELS: string[] = (
   process.env.GEMINI_MODELS ??
   process.env.GEMINI_MODEL ??
-  "gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.0-flash,gemini-2.0-flash-lite"
+  "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash,gemini-2.0-flash-lite"
 )
   .split(",")
   .map((s) => s.trim())
