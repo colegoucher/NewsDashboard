@@ -1,0 +1,45 @@
+name: pipeline
+
+on:
+  schedule:
+    # 8am America/New_York is 12:00 UTC during EDT and 13:00 UTC during EST.
+    # Both fire; a gate step below runs the pipeline only when it's actually
+    # 8am Eastern, so the schedule survives DST without edits.
+    - cron: "0 12 * * *"
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Gate scheduled runs to 8am Eastern
+        if: github.event_name == 'schedule'
+        run: |
+          if [ "$(TZ=America/New_York date +%H)" != "08" ]; then
+            echo "Not 8am Eastern — skipping (DST double-cron gate)."
+            echo "SKIP=true" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/checkout@v4
+        if: env.SKIP != 'true'
+
+      - uses: actions/setup-node@v4
+        if: env.SKIP != 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: env.SKIP != 'true'
+        run: npm ci
+
+      - name: Run pipeline
+        if: env.SKIP != 'true'
+        run: npx tsx src/pipeline/run.ts ${{ github.event_name == 'workflow_dispatch' && '--manual' || '' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}

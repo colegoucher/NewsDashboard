@@ -1,0 +1,198 @@
+import { GoogleGenAI } from "@google/genai";
+import { sql } from "drizzle-orm";
+import { z } from "zod";
+import { db } from "@/db";
+import { settings } from "@/db/schema";
+import { CATEGORIES, GEMINI_DAILY_BUDGET, GEMINI_MAX_RPM, GEMINI_MODEL } from "./config";
+
+// All Gemini access goes through this module: one place for rate limiting,
+// the daily budget, and provider swap if the free tier ever changes.
+
+let client: GoogleGenAI | null = null;
+function getClient(): GoogleGenAI {
+  if (!client) {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) throw new Error("GEMINI_API_KEY is not set");
+    client = new GoogleGenAI({ apiKey: key });
+  }
+  return client;
+}
+
+// ---- daily budget (shared across pipeline and Ask-AI, persisted in settings) ----
+
+function todayKey(): string {
+  return `gemini_calls_${new Date().toISOString().slice(0, 10)}`;
+}
+
+export class BudgetExceededError extends Error {
+  constructor() {
+    super("Gemini daily budget exceeded");
+  }
+}
+
+async function consumeBudget(): Promise<void> {
+  const key = todayKey();
+  const [row] = await db
+    .insert(settings)
+    .values({ key, value: "1" })
+    .onConflictDoUpdate({
+      target: settings.key,
+      set: { value: sql`(${settings.value}::int + 1)::text`, updatedAt: sql`now()` },
+    })
+    .returning({ value: settings.value });
+  if (Number(row.value) > GEMINI_DAILY_BUDGET) throw new BudgetExceededError();
+}
+
+// ---- rate limiting (process-local; the pipeline is the only bulk caller) ----
+
+let lastCallAt = 0;
+async function rateLimit(): Promise<void> {
+  const minInterval = Math.ceil(60_000 / GEMINI_MAX_RPM);
+  const wait = lastCallAt + minInterval - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastCallAt = Date.now();
+}
+
+async function generate(prompt: string, jsonSchema?: object): Promise<string> {
+  await consumeBudget();
+  await rateLimit();
+  const res = await getClient().models.generateContent({
+    model: GEMINI_MODEL,
+    contents: prompt,
+    config: jsonSchema
+      ? { responseMimeType: "application/json", responseSchema: jsonSchema }
+      : undefined,
+  });
+  const text = res.text;
+  if (!text) throw new Error("empty Gemini response");
+  return text;
+}
+
+// ---- summarize + categorize (one structured call per item) ----
+
+const summarySchema = z.object({
+  summary: z.string(),
+  category: z.string(),
+  tags: z.array(z.string()),
+});
+
+export interface SummarizeResult {
+  summary: string;
+  category: string;
+  tags: string[];
+}
+
+export async function summarizeItem(input: {
+  title: string;
+  sourceName: string;
+  content: string;
+  isExcerptOnly: boolean;
+}): Promise<SummarizeResult> {
+  const prompt = [
+    `Summarize this article for a personal news dashboard. The summary is the primary reading experience — it should let the reader fully absorb the story without clicking through.`,
+    input.isExcerptOnly
+      ? `NOTE: only an excerpt of the article was available. Summarize what is present without inventing details, and keep it proportionally short.`
+      : ``,
+    `Write 2-4 tight paragraphs in plain prose (no headers, no bullet lists unless the content is inherently list-like). Lead with the core news.`,
+    `Also assign exactly one category from this list: ${CATEGORIES.join(", ")}.`,
+    `Also assign 1-4 short topical tags (lowercase, e.g. "rust", "openai", "chips").`,
+    ``,
+    `Source: ${input.sourceName}`,
+    `Title: ${input.title}`,
+    ``,
+    input.content,
+  ].join("\n");
+
+  const raw = await generate(prompt, {
+    type: "object",
+    properties: {
+      summary: { type: "string" },
+      category: { type: "string", enum: [...CATEGORIES] },
+      tags: { type: "array", items: { type: "string" } },
+    },
+    required: ["summary", "category", "tags"],
+  });
+
+  const parsed = summarySchema.parse(JSON.parse(raw));
+  const category = (CATEGORIES as readonly string[]).includes(parsed.category)
+    ? parsed.category
+    : "Other";
+  return { summary: parsed.summary, category, tags: parsed.tags.slice(0, 4) };
+}
+
+// ---- Ask-AI ----
+
+export async function askAboutArticle(input: {
+  title: string;
+  content: string;
+  contentStatus: string;
+  question: string;
+  history: { role: "user" | "assistant"; text: string }[];
+}): Promise<string> {
+  const historyBlock = input.history
+    .map((m) => `${m.role === "user" ? "Q" : "A"}: ${m.text}`)
+    .join("\n");
+  const prompt = [
+    `You are answering questions about a news article for its reader. Answer from the article text below. If the answer isn't in the text, say so plainly — do not invent details.`,
+    input.contentStatus !== "full"
+      ? `NOTE: only a partial excerpt of the article is available; caveat answers accordingly.`
+      : ``,
+    ``,
+    `Article title: ${input.title}`,
+    `Article text:\n${input.content}`,
+    ``,
+    historyBlock ? `Previous exchange:\n${historyBlock}\n` : ``,
+    `Question: ${input.question}`,
+  ].join("\n");
+
+  return generate(prompt);
+}
+
+// ---- Discover taste reasoning ----
+
+const discoverSchema = z.object({
+  picks: z.array(z.object({ itemId: z.number(), reason: z.string() })),
+});
+
+export async function pickDiscoverItems(input: {
+  tasteSummary: string;
+  candidates: { id: number; title: string; category: string | null; sourceName: string }[];
+}): Promise<{ itemId: number; reason: string }[]> {
+  const prompt = [
+    `You are curating a "Maybe I'd Like" section of a personal news dashboard.`,
+    `Reader's taste profile (derived from their voting/reading history):`,
+    input.tasteSummary,
+    ``,
+    `From the candidate items below, pick up to 8: mostly good fits for their taste, but include 1-2 that are genuinely interesting departures from their usual lane (label those honestly in the reason).`,
+    `For each pick give a one-sentence reason written to the reader ("Because you...").`,
+    ``,
+    `Candidates:`,
+    ...input.candidates.map(
+      (c) => `id=${c.id} [${c.category ?? "?"}] (${c.sourceName}) ${c.title}`
+    ),
+  ].join("\n");
+
+  const raw = await generate(prompt, {
+    type: "object",
+    properties: {
+      picks: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            itemId: { type: "number" },
+            reason: { type: "string" },
+          },
+          required: ["itemId", "reason"],
+        },
+      },
+    },
+    required: ["picks"],
+  });
+
+  const validIds = new Set(input.candidates.map((c) => c.id));
+  return discoverSchema
+    .parse(JSON.parse(raw))
+    .picks.filter((p) => validIds.has(p.itemId))
+    .slice(0, 8);
+}
