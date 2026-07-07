@@ -8,6 +8,7 @@ import {
   GEMINI_DAILY_BUDGET,
   GEMINI_MAX_RPM,
   GEMINI_MODELS,
+  GROQ_MODELS,
 } from "./config";
 import { getCategories } from "./categories";
 
@@ -66,7 +67,65 @@ async function rateLimit(): Promise<void> {
   lastCallAt = Date.now();
 }
 
-// ---- model fallback chain ----
+// ---- provider/model fallback chain ----
+// Gemini models first (best quality), then Groq models as deep overflow
+// (free tier is ~25-350x Gemini's). Each entry has its own daily quota.
+
+interface ChainEntry {
+  provider: "gemini" | "groq";
+  model: string;
+}
+
+function providerChain(): ChainEntry[] {
+  const chain: ChainEntry[] = GEMINI_MODELS.map((m) => ({ provider: "gemini" as const, model: m }));
+  if (process.env.GROQ_API_KEY) {
+    chain.push(...GROQ_MODELS.map((m) => ({ provider: "groq" as const, model: m })));
+  }
+  return chain;
+}
+
+async function callGemini(model: string, prompt: string, jsonSchema?: object): Promise<string> {
+  const res = await getClient().models.generateContent({
+    model,
+    contents: prompt,
+    config: jsonSchema
+      ? { responseMimeType: "application/json", responseSchema: jsonSchema }
+      : undefined,
+  });
+  const text = res.text;
+  if (!text) throw new Error("empty Gemini response");
+  return text;
+}
+
+async function callGroq(model: string, prompt: string, jsonSchema?: object): Promise<string> {
+  // OpenAI-compatible endpoint. json_object mode requires the word JSON in
+  // the prompt, so the schema is inlined as an instruction.
+  const content = jsonSchema
+    ? `${prompt}\n\nRespond with ONLY a valid JSON object matching this JSON Schema (no prose, no markdown fences):\n${JSON.stringify(jsonSchema)}`
+    : prompt;
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content }],
+      ...(jsonSchema ? { response_format: { type: "json_object" } } : {}),
+    }),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) {
+    throw new Error(`groq ${res.status}: ${(await res.text()).slice(0, 500)}`);
+  }
+  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+  let text = data.choices?.[0]?.message?.content;
+  if (!text) throw new Error("empty groq response");
+  // Strip markdown fences if the model added them despite instructions.
+  text = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  return text;
+}
 
 // Process-local; a fresh pipeline run re-probes all models.
 const modelState = new Map<string, "exhausted" | "unavailable">();
@@ -74,46 +133,36 @@ const modelState = new Map<string, "exhausted" | "unavailable">();
 const MAX_RETRIES = 3;
 
 async function generate(prompt: string, jsonSchema?: object): Promise<string> {
-  for (const model of GEMINI_MODELS) {
-    if (modelState.has(model)) continue;
+  for (const { provider, model } of providerChain()) {
+    const key = `${provider}:${model}`;
+    if (modelState.has(key)) continue;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       await consumeBudget();
       await rateLimit();
       try {
-        const res = await getClient().models.generateContent({
-          model,
-          contents: prompt,
-          config: jsonSchema
-            ? { responseMimeType: "application/json", responseSchema: jsonSchema }
-            : undefined,
-        });
-        const text = res.text;
-        if (!text) throw new Error("empty Gemini response");
-        return text;
+        return provider === "gemini"
+          ? await callGemini(model, prompt, jsonSchema)
+          : await callGroq(model, prompt, jsonSchema);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
 
         // Daily quota spent for this model -> mark it and move down the chain.
-        if (msg.includes("PerDay")) {
-          modelState.set(model, "exhausted");
-          console.log(`gemini: ${model} daily quota exhausted, trying next model`);
+        if (/PerDay|per day|RPD|TPD/i.test(msg)) {
+          modelState.set(key, "exhausted");
+          console.log(`llm: ${key} daily quota exhausted, trying next`);
           break;
         }
         // Model doesn't exist (retired/renamed) -> skip it permanently this run.
-        if (msg.includes("NOT_FOUND") || msg.includes("404")) {
-          modelState.set(model, "unavailable");
-          console.log(`gemini: ${model} not available, trying next model`);
+        if (/NOT_FOUND|404|model_not_found|decommissioned/i.test(msg)) {
+          modelState.set(key, "unavailable");
+          console.log(`llm: ${key} not available, trying next`);
           break;
         }
         // Per-minute limit or transient overload -> wait and retry same model.
-        const retryable =
-          msg.includes("RESOURCE_EXHAUSTED") ||
-          msg.includes("429") ||
-          msg.includes("UNAVAILABLE") ||
-          msg.includes("503");
+        const retryable = /RESOURCE_EXHAUSTED|429|UNAVAILABLE|503|rate.?limit/i.test(msg);
         if (!retryable || attempt >= MAX_RETRIES) throw e;
-        const suggested = msg.match(/retry in ([\d.]+)s/i);
+        const suggested = msg.match(/(?:retry|try again) in ([\d.]+)s/i);
         const delayMs = suggested
           ? Math.ceil(Number(suggested[1]) * 1000) + 1000
           : 15_000 * (attempt + 1);
@@ -121,7 +170,7 @@ async function generate(prompt: string, jsonSchema?: object): Promise<string> {
       }
     }
   }
-  throw new BudgetExceededError("all Gemini models exhausted or unavailable for today");
+  throw new BudgetExceededError("all AI providers exhausted or unavailable for today");
 }
 
 // ---- batched summarize + categorize ----

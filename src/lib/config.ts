@@ -12,13 +12,23 @@ export const FEED_WINDOW_DAYS = 14;
 // as low as ~20 requests/model — so summarization is batched (many articles per
 // call) and models are tried in a fallback chain (quotas are per-model).
 export const GEMINI_MAX_RPM = Number(process.env.GEMINI_MAX_RPM ?? 10);
-export const GEMINI_DAILY_BUDGET = Number(process.env.GEMINI_DAILY_BUDGET ?? 300);
+// Global our-side cap across ALL providers (safety net against runaway loops).
+export const GEMINI_DAILY_BUDGET = Number(process.env.GEMINI_DAILY_BUDGET ?? 500);
 // Quality-first: the smarter model summarizes the first batches of the day,
 // then the chain degrades to lighter models as each daily quota runs out.
 export const GEMINI_MODELS: string[] = (
   process.env.GEMINI_MODELS ??
   process.env.GEMINI_MODEL ??
   "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash,gemini-2.0-flash-lite"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+// Overflow provider: Groq free tier (~1k+ req/day). Only used when
+// GROQ_API_KEY is set and the Gemini chain is exhausted for the day.
+export const GROQ_MODELS: string[] = (
+  process.env.GROQ_MODELS ?? "llama-3.3-70b-versatile,llama-3.1-8b-instant"
 )
   .split(",")
   .map((s) => s.trim())
