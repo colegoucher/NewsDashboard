@@ -1,8 +1,10 @@
 import { ItemCard } from "@/components/item-card";
 import { Nav } from "@/components/nav";
 import { AiPicksSection } from "@/components/ai-picks";
+import { SourceSuggestions } from "@/components/source-suggestions";
 import { getDiscoverCandidates } from "@/lib/queries";
 import { getSetting } from "@/lib/settings";
+import { getSourceSuggestions } from "@/lib/suggest-sources";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +14,10 @@ export interface CachedPicks {
 }
 
 export default async function DiscoverPage() {
-  const candidates = await getDiscoverCandidates();
+  const [candidates, sourceSuggestions] = await Promise.all([
+    getDiscoverCandidates(),
+    getSourceSuggestions(),
+  ]);
 
   const cachedRaw = await getSetting(`discover_picks_${new Date().toISOString().slice(0, 10)}`);
   const cached: CachedPicks | null = cachedRaw ? JSON.parse(cachedRaw) : null;
@@ -26,6 +31,7 @@ export default async function DiscoverPage() {
     <>
       <Nav active="discover" />
       <main className="mx-auto max-w-3xl px-4 py-6">
+        <SourceSuggestions suggestions={sourceSuggestions} />
         <AiPicksSection hasPicks={aiPicks.length > 0}>
           {aiPicks.map(({ item, reason }) => (
             <ItemCard key={item.id} item={item} reason={reason} refreshOnAction />

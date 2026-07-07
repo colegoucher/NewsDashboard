@@ -73,6 +73,8 @@ Adding a new source later = writing one new module that returns this shape. Noth
 
 The starting feed/subreddit list lives in the `sources` table (seeded by a script, editable without code changes).
 
+**Organic source discovery:** aggregator sources (HN, Reddit) surface articles from sites we don't follow. When a site's articles keep earning upvotes/saves, Discover suggests promoting it — one click auto-detects the site's RSS feed and adds it as a full source. The follow list grows from evidence, not manual curation.
+
 ---
 
 ## 4. Fetch, Dedup & Extraction
