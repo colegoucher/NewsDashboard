@@ -1,6 +1,8 @@
 // Given a bare domain, find its RSS/Atom feed: first via the <link
 // rel="alternate"> tags on the homepage, then common feed paths.
 
+import { assertPublicUrl } from "./ssrf";
+
 const COMMON_PATHS = ["/feed", "/rss", "/rss.xml", "/atom.xml", "/feed.xml", "/index.xml"];
 
 const FETCH_OPTS: RequestInit = {
@@ -14,6 +16,7 @@ const FETCH_OPTS: RequestInit = {
 
 async function looksLikeFeed(url: string): Promise<boolean> {
   try {
+    await assertPublicUrl(url);
     const res = await fetch(url, FETCH_OPTS);
     if (!res.ok) return false;
     const head = (await res.text()).slice(0, 2000);
@@ -28,6 +31,7 @@ export async function discoverFeedUrl(domain: string): Promise<string | null> {
 
   // 1. Homepage <link rel="alternate" type="application/rss+xml" href="...">
   try {
+    await assertPublicUrl(base);
     const res = await fetch(base, FETCH_OPTS);
     if (res.ok) {
       const html = await res.text();

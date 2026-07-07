@@ -1,5 +1,6 @@
 import { Readability } from "@mozilla/readability";
 import { JSDOM, VirtualConsole } from "jsdom";
+import { assertPublicUrl } from "./ssrf";
 
 export interface ExtractionResult {
   text: string | null;
@@ -16,6 +17,7 @@ const MAX_CONTENT_CHARS = 40_000; // plenty for summarization/Q&A, keeps rows sm
  */
 export async function extractArticle(url: string): Promise<ExtractionResult> {
   try {
+    await assertPublicUrl(url);
     const res = await fetch(url, {
       headers: {
         "User-Agent":
