@@ -19,6 +19,16 @@ async function main() {
     sql`select count(*) as total, count(summary) as summarized from items`
   );
   console.log(`items: ${counts.total} total, ${counts.summarized} summarized`);
+
+  const allSources = await db.query.sources.findMany();
+  console.log(
+    "sources:",
+    allSources.map((s) => `${s.name}${s.active ? "" : " (off)"}`).join(", ")
+  );
+  const cats = await db.query.settings.findFirst({
+    where: (t, { eq }) => eq(t.key, "categories"),
+  });
+  console.log("categories setting:", cats?.value ?? "(defaults)");
   process.exit(0);
 }
 

@@ -43,15 +43,31 @@ export function RefreshControls({ lastRun, autoFetchEnabled }: Props) {
     : "never fetched";
 
   return (
-    <div className="flex items-center gap-3 text-xs text-neutral-500 dark:text-neutral-400">
-      <span title={lastRun?.error ?? undefined}>{note ?? lastLabel}</span>
+    <div className="flex min-w-0 items-center gap-2 text-xs text-stone-500 sm:gap-3 dark:text-stone-400">
+      {/* Feedback notes show everywhere; the passive status line is desktop-only */}
+      {note ? (
+        <span className="min-w-0 truncate font-medium text-indigo-600 dark:text-indigo-400">
+          {note}
+        </span>
+      ) : (
+        <>
+          <span className="hidden truncate md:inline" title={lastRun?.error ?? undefined}>
+            {lastLabel}
+          </span>
+          {lastRun?.status === "failed" && (
+            <span className="md:hidden" title={lastRun.error ?? "last run failed"}>
+              ⚠
+            </span>
+          )}
+        </>
+      )}
       <button
         onClick={toggleAuto}
         title="Daily 8am auto-fetch"
-        className={`rounded-full border px-2 py-1 ${
+        className={`shrink-0 rounded-full border px-2 py-1 ${
           auto
             ? "border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-400"
-            : "border-neutral-300 dark:border-neutral-700"
+            : "border-stone-300 dark:border-stone-700"
         }`}
       >
         auto {auto ? "on" : "off"}
@@ -59,7 +75,7 @@ export function RefreshControls({ lastRun, autoFetchEnabled }: Props) {
       <button
         onClick={refresh}
         disabled={busy}
-        className="rounded-full border border-neutral-300 px-2 py-1 hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        className="shrink-0 rounded-full border border-stone-300 px-2 py-1 hover:bg-stone-100 disabled:opacity-50 dark:border-stone-700 dark:hover:bg-stone-800"
       >
         {busy ? "…" : "refresh"}
       </button>

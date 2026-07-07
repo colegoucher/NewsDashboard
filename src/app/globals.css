@@ -24,6 +24,9 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* Never let an overflowing element make the whole page pan sideways.
+     clip (not hidden) so position:sticky keeps working. */
+  overflow-x: clip;
 }
 
 /* Multi-line truncation used by the cards */

@@ -21,7 +21,7 @@ export function AddTopic() {
     const body = await res.json().catch(() => ({}));
     if (res.ok) {
       setNote(
-        `"${body.topic}" added — articles from across the web start arriving with the next fetch.`
+        `"${body.topic}" is saved ✓ — its tab appears once articles arrive (next fetch, usually tomorrow morning). Nothing else to do.`
       );
       setTopic("");
     } else {
