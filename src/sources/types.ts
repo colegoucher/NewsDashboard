@@ -6,6 +6,7 @@ export interface FetchedItem {
   externalId: string; // unique per source — dedup key
   /** true when rawContent is already the complete content (e.g. reddit self-post) */
   contentComplete?: boolean;
+  imageUrl?: string | null; // thumbnail if the source provides one
 }
 
 export interface SourceRecord {

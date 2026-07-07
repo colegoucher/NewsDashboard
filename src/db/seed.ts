@@ -17,6 +17,12 @@ const STARTER_SOURCES: { name: string; type: string; config: Record<string, stri
   { name: "r/programming", type: "reddit", config: { subreddit: "programming" } },
   { name: "r/MachineLearning", type: "reddit", config: { subreddit: "MachineLearning" } },
   { name: "r/technology", type: "reddit", config: { subreddit: "technology" } },
+  // Topic streams: cross-site articles (any outlet) for the core categories.
+  // limit keeps each stream's volume inside the daily AI budget.
+  { name: "Topic: Programming", type: "googlenews", config: { query: "programming software development", limit: "10" } },
+  { name: "Topic: AI", type: "googlenews", config: { query: "artificial intelligence", limit: "10" } },
+  { name: "Topic: Tech", type: "googlenews", config: { query: "technology", limit: "10" } },
+  { name: "Topic: World News", type: "googlenews", config: { query: "world news", limit: "10" } },
 ];
 
 async function main() {

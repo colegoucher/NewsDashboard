@@ -22,12 +22,15 @@ export const fetchRss: SourceFetcher = async (source, limit) => {
     const body =
       (typeof encoded === "string" && encoded) || entry.content || entry.contentSnippet || null;
 
+    const enclosure = entry.enclosure?.url;
     items.push({
       title: entry.title,
       url,
       rawContent: body ? stripHtml(body) : null,
       publishedAt: entry.isoDate ? new Date(entry.isoDate) : new Date(),
       externalId: entry.guid ?? url,
+      imageUrl:
+        enclosure && (entry.enclosure?.type ?? "").startsWith("image") ? enclosure : null,
     });
   }
   return items;

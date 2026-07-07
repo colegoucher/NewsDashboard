@@ -40,6 +40,7 @@ interface RedditPost {
   is_self: boolean;
   created_utc: number;
   stickied: boolean;
+  preview?: { images?: { source?: { url?: string } }[] };
 }
 
 export const fetchReddit: SourceFetcher = async (source, limit) => {
@@ -67,6 +68,7 @@ export const fetchReddit: SourceFetcher = async (source, limit) => {
         contentComplete: isSelf,
         publishedAt: new Date(p.created_utc * 1000),
         externalId: p.id,
+        imageUrl: p.preview?.images?.[0]?.source?.url ?? null,
       };
     });
 };

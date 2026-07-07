@@ -13,11 +13,13 @@ export default async function FeedPage({
   const { category } = await searchParams;
   const [feed, categories] = await Promise.all([getFeed(category), getActiveCategories()]);
 
+  const [top, ...rest] = feed;
+
   return (
     <>
       <Nav active="feed" />
-      <main className="mx-auto max-w-3xl px-4 py-6">
-        <div className="mb-4 flex flex-wrap gap-1.5">
+      <main className="mx-auto max-w-3xl px-3 py-4 sm:px-4 sm:py-6">
+        <div className="scrollbar-none -mx-3 mb-4 flex gap-1.5 overflow-x-auto px-3 pb-1 sm:mx-0 sm:flex-wrap sm:px-0">
           <CategoryTab href="/" label="All" active={!category} />
           {categories.map((c) => (
             <CategoryTab
@@ -29,12 +31,16 @@ export default async function FeedPage({
           ))}
         </div>
         {feed.length === 0 ? (
-          <p className="py-16 text-center text-sm text-neutral-500">
-            Nothing here — hit refresh, or everything&apos;s been read. 🎉
-          </p>
+          <div className="py-20 text-center">
+            <div className="mb-3 text-4xl">🎉</div>
+            <p className="text-sm text-stone-500">
+              All caught up — hit refresh, or come back after the morning fetch.
+            </p>
+          </div>
         ) : (
           <div className="space-y-3">
-            {feed.map((item) => (
+            {top && <ItemCard item={top} hero refreshOnAction />}
+            {rest.map((item) => (
               <ItemCard key={item.id} item={item} refreshOnAction />
             ))}
           </div>
@@ -48,10 +54,10 @@ function CategoryTab({ href, label, active }: { href: string; label: string; act
   return (
     <Link
       href={href}
-      className={`rounded-full px-3 py-1 text-xs font-medium ${
+      className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition sm:py-1 ${
         active
-          ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900"
-          : "bg-neutral-200 text-neutral-700 hover:bg-neutral-300 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+          ? "bg-stone-900 text-white shadow-sm dark:bg-white dark:text-stone-900"
+          : "bg-stone-200/70 text-stone-700 hover:bg-stone-300/70 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700"
       }`}
     >
       {label}

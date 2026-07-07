@@ -37,6 +37,7 @@ export const items = pgTable(
     summary: text("summary"),
     category: text("category"),
     tags: jsonb("tags").$type<string[]>(),
+    imageUrl: text("image_url"),
   },
   (t) => [
     uniqueIndex("items_source_external_unique").on(t.sourceId, t.externalId),

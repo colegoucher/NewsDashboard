@@ -15,6 +15,7 @@ export interface FeedItem {
   sourceName: string;
   sourceId: number;
   contentStatus: string;
+  imageUrl: string | null;
   saved: boolean;
 }
 
@@ -29,6 +30,7 @@ const baseColumns = {
   sourceId: items.sourceId,
   sourceName: sources.name,
   contentStatus: items.contentStatus,
+  imageUrl: items.imageUrl,
 };
 
 function windowStart(): Date {

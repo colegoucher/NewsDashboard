@@ -1,47 +1,95 @@
 import Link from "next/link";
+import { categoryColor } from "@/lib/category-colors";
 import type { FeedItem } from "@/lib/queries";
 import { ActionButtons } from "./action-buttons";
 
 export function ItemCard({
   item,
   reason,
+  hero = false,
   refreshOnAction = false,
 }: {
   item: FeedItem;
   reason?: string;
+  hero?: boolean;
   refreshOnAction?: boolean;
 }) {
-  const teaser = item.summary
-    ? item.summary.slice(0, 220) + (item.summary.length > 220 ? "…" : "")
-    : "(not yet summarized)";
+  const teaser = item.summary ?? "Not summarized yet — arrives with the next fetch.";
+
+  if (hero && item.imageUrl) {
+    return (
+      <article className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm transition hover:shadow-md dark:border-stone-800 dark:bg-stone-900">
+        <Link href={`/item/${item.id}`} className="group block">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={item.imageUrl}
+            alt=""
+            loading="lazy"
+            className="h-48 w-full object-cover transition duration-300 group-hover:scale-[1.02] sm:h-64"
+          />
+          <div className="p-4 sm:p-5">
+            <Meta item={item} />
+            <h2 className="mt-1.5 text-lg font-bold leading-snug group-hover:underline sm:text-xl">
+              {item.title}
+            </h2>
+            <p className="clamp-3 mt-2 text-sm leading-relaxed text-stone-600 dark:text-stone-400">
+              {teaser}
+            </p>
+          </div>
+        </Link>
+        <div className="px-4 pb-4 sm:px-5">
+          <ActionButtons itemId={item.id} saved={item.saved} refreshOnAction={refreshOnAction} />
+        </div>
+      </article>
+    );
+  }
 
   return (
-    <article className="rounded-xl border border-neutral-200 bg-white p-4 transition-shadow hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-      <div className="mb-1.5 flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-        <span>{item.sourceName}</span>
-        <span>·</span>
-        <time>{formatDate(item.publishedAt)}</time>
-        {item.category && (
-          <span className="ml-auto rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-            {item.category}
-          </span>
+    <article className="rounded-2xl border border-stone-200 bg-white p-3.5 shadow-sm transition hover:shadow-md sm:p-4 dark:border-stone-800 dark:bg-stone-900">
+      <Link href={`/item/${item.id}`} className="group flex gap-3.5">
+        <div className="min-w-0 flex-1">
+          <Meta item={item} />
+          <h2 className="clamp-2 mt-1 text-[15px] font-semibold leading-snug group-hover:underline sm:text-base">
+            {item.title}
+          </h2>
+          <p className="clamp-2 mt-1.5 text-[13px] leading-relaxed text-stone-600 sm:text-sm dark:text-stone-400">
+            {teaser}
+          </p>
+        </div>
+        {item.imageUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={item.imageUrl}
+            alt=""
+            loading="lazy"
+            className="h-20 w-24 shrink-0 rounded-xl object-cover sm:h-24 sm:w-32"
+          />
         )}
-      </div>
-      <Link href={`/item/${item.id}`} className="group block">
-        <h2 className="text-base font-semibold leading-snug group-hover:underline">
-          {item.title}
-        </h2>
-        <p className="mt-1.5 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
-          {teaser}
-        </p>
       </Link>
       {reason && (
         <p className="mt-2 text-xs italic text-indigo-600 dark:text-indigo-400">{reason}</p>
       )}
-      <div className="mt-3">
+      <div className="mt-2.5">
         <ActionButtons itemId={item.id} saved={item.saved} refreshOnAction={refreshOnAction} />
       </div>
     </article>
+  );
+}
+
+function Meta({ item }: { item: FeedItem }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
+      <span className="font-medium">{item.sourceName}</span>
+      <span aria-hidden>·</span>
+      <time>{formatDate(item.publishedAt)}</time>
+      {item.category && (
+        <span
+          className={`rounded-full px-2 py-0.5 font-medium ${categoryColor(item.category)}`}
+        >
+          {item.category}
+        </span>
+      )}
+    </div>
   );
 }
 

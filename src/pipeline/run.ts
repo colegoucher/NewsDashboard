@@ -44,7 +44,10 @@ async function main() {
         continue;
       }
       try {
-        const fetchedItems = await fetcher(source, FETCH_LIMIT_PER_SOURCE);
+        // Sources can cap their own volume (topic streams use this to stay
+        // inside the AI budget); default is the global per-source limit.
+        const limit = Number(source.config.limit) || FETCH_LIMIT_PER_SOURCE;
+        const fetchedItems = await fetcher(source, limit);
         for (const fi of fetchedItems) {
           const canonicalUrl = canonicalizeUrl(fi.url);
           // Canonical-URL dedup across sources (same article via two feeds).
@@ -65,6 +68,7 @@ async function main() {
               publishedAt: fi.publishedAt,
               rawContent: fi.rawContent,
               contentStatus: fi.contentComplete && fi.rawContent ? "full" : "pending",
+              imageUrl: fi.imageUrl ?? null,
             })
             .onConflictDoNothing({ target: [items.sourceId, items.externalId] })
             .returning({ id: items.id });
@@ -86,19 +90,20 @@ async function main() {
     for (const item of pending) {
       const isRedditPermalink = item.url.includes("reddit.com/r/");
       const result = isRedditPermalink
-        ? { text: null, status: "failed" as const } // comment threads don't extract usefully
+        ? { text: null, status: "failed" as const, imageUrl: null } // comment threads don't extract usefully
         : await extractArticle(item.url);
 
+      const imageUrl = item.imageUrl ?? result.imageUrl;
       if (result.status === "full") {
         await db
           .update(items)
-          .set({ rawContent: result.text, contentStatus: "full" })
+          .set({ rawContent: result.text, contentStatus: "full", imageUrl })
           .where(eq(items.id, item.id));
       } else {
         // Fall back to whatever the source gave us (RSS excerpt / nothing).
         await db
           .update(items)
-          .set({ contentStatus: item.rawContent ? "excerpt" : "failed" })
+          .set({ contentStatus: item.rawContent ? "excerpt" : "failed", imageUrl })
           .where(eq(items.id, item.id));
       }
     }
