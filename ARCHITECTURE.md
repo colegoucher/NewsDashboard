@@ -97,8 +97,11 @@ The starting feed/subreddit list lives in the `sources` table (seeded by a scrip
 
 ## 5. Summarization Layer (AI)
 
-- **Gemini API free tier (Flash-Lite model)** — no cost. After Google's Dec 2025 quota cuts, `gemini-2.5-flash-lite` (15 RPM / 1,000 req/day free) is the only free model with a workable daily quota — full Flash is down to 20/day. Kept behind a small `summarize()` interface so the provider can be swapped if the free tier changes again.
-- One structured call per item returns **summary + category + tags** together (categories are assigned here — see §6; the model picks from a fixed configured list, with an "Other" fallback).
+- **Gemini API free tier** — no cost. After Google's Dec 2025 quota cuts, observed free daily quotas are as low as **~20 requests per model per day** (regardless of what third-party guides claim). Two design consequences:
+  - **Batched summarization:** one structured call covers ~8 articles (a 120-article morning ≈ 15 calls, not 120).
+  - **Model fallback chain:** daily quotas are per-model, so when `flash-lite` is spent the code walks to `2.5-flash`, then the 2.0 models — each model is fresh headroom. Retired models are skipped automatically.
+  All Gemini access lives behind one module so the provider can be swapped if the free tier changes again.
+- Each batched call returns **summary + category + tags** per article (categories are assigned here — see §6; the model picks from a fixed configured list, with an "Other" fallback).
 - **Rate limiting is designed in, not bolted on:** the pipeline sleeps between calls to stay under the free tier's requests-per-minute limit, caps items per run, and enforces a daily request budget in code so a bug can't burn the day's quota (free-tier daily caps are real, and a lockout lasts until midnight Pacific).
 - Summarization is a **separate phase from fetching**: items are stored raw first, then a "summarize up to K unsummarized items" loop runs. A partial failure never loses fetched data.
 - **Ask-AI:** a chat box under each summary sends your question + the stored article text to Gemini. If `raw_content` has been pruned (see retention), it re-fetches the article on demand; if extraction fails, it answers from the excerpt and says so. Shares the same rate limit/daily budget. Behind auth like everything else.

@@ -17,11 +17,23 @@ export const RAW_CONTENT_RETENTION_DAYS = 30;
 // Feed shows items published within this window.
 export const FEED_WINDOW_DAYS = 14;
 
-// Gemini free-tier guards. Post-Dec-2025 quota cuts: flash-lite is the only
-// free model with a workable daily quota (15 RPM / 1,000 RPD vs flash's 5/20).
+// Gemini free-tier guards. Post-Dec-2025 quota cuts, observed daily quotas are
+// as low as ~20 requests/model — so summarization is batched (many articles per
+// call) and models are tried in a fallback chain (quotas are per-model).
 export const GEMINI_MAX_RPM = Number(process.env.GEMINI_MAX_RPM ?? 10);
 export const GEMINI_DAILY_BUDGET = Number(process.env.GEMINI_DAILY_BUDGET ?? 300);
-export const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite";
+export const GEMINI_MODELS: string[] = (
+  process.env.GEMINI_MODELS ??
+  process.env.GEMINI_MODEL ??
+  "gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.0-flash,gemini-2.0-flash-lite"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+// Articles per summarization call, and how much of each article goes in.
+export const SUMMARIZE_PER_CALL = Number(process.env.SUMMARIZE_PER_CALL ?? 8);
+export const BATCH_CONTENT_CHARS = 6000;
 
 // Max items summarized per pipeline run (keeps a huge backlog from eating the day's budget).
 export const SUMMARIZE_BATCH_LIMIT = Number(process.env.SUMMARIZE_BATCH_LIMIT ?? 80);

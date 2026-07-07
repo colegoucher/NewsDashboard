@@ -6,10 +6,11 @@ import {
   FETCH_LIMIT_PER_SOURCE,
   RAW_CONTENT_RETENTION_DAYS,
   SUMMARIZE_BATCH_LIMIT,
+  SUMMARIZE_PER_CALL,
 } from "@/lib/config";
 import { canonicalizeUrl } from "@/lib/canonical-url";
 import { extractArticle } from "@/lib/extract";
-import { BudgetExceededError, summarizeItem } from "@/lib/gemini";
+import { BudgetExceededError, summarizeBatch } from "@/lib/gemini";
 import { getSetting } from "@/lib/settings";
 import { SOURCE_FETCHERS } from "@/sources";
 
@@ -118,26 +119,33 @@ async function main() {
       .orderBy(sql`${items.publishedAt} desc`)
       .limit(SUMMARIZE_BATCH_LIMIT);
 
-    for (const item of toSummarize) {
-      const content = item.rawContent ?? item.title;
+    for (let i = 0; i < toSummarize.length; i += SUMMARIZE_PER_CALL) {
+      const chunk = toSummarize.slice(i, i + SUMMARIZE_PER_CALL);
       try {
-        const result = await summarizeItem({
-          title: item.title,
-          sourceName: item.sourceName,
-          content,
-          isExcerptOnly: item.contentStatus !== "full",
-        });
-        await db
-          .update(items)
-          .set({ summary: result.summary, category: result.category, tags: result.tags })
-          .where(eq(items.id, item.id));
-        summarized++;
+        const results = await summarizeBatch(
+          chunk.map((item) => ({
+            id: item.id,
+            title: item.title,
+            sourceName: item.sourceName,
+            content: item.rawContent ?? item.title,
+            isExcerptOnly: item.contentStatus !== "full",
+          }))
+        );
+        for (const [id, r] of results) {
+          await db
+            .update(items)
+            .set({ summary: r.summary, category: r.category, tags: r.tags })
+            .where(eq(items.id, id));
+          summarized++;
+        }
       } catch (e) {
         if (e instanceof BudgetExceededError) {
-          errors.push("Gemini daily budget hit — remaining items left for next run");
+          errors.push(`${e.message} — remaining items left for next run`);
           break;
         }
-        errors.push(`summarize item ${item.id}: ${e instanceof Error ? e.message : String(e)}`);
+        errors.push(
+          `summarize batch [${chunk.map((c) => c.id).join(",")}]: ${e instanceof Error ? e.message : String(e)}`
+        );
       }
     }
     console.log(`phase 3 done: ${summarized} items summarized`);
