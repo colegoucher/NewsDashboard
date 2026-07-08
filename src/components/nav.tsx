@@ -3,7 +3,11 @@ import { getLastRun } from "@/lib/queries";
 import { getSetting } from "@/lib/settings";
 import { RefreshControls } from "./refresh-controls";
 
-export async function Nav({ active }: { active: "feed" | "discover" | "saved" }) {
+export async function Nav({
+  active,
+}: {
+  active: "feed" | "discover" | "saved" | "taste" | "search";
+}) {
   const [lastRun, autoFetch] = await Promise.all([getLastRun(), getSetting("auto_fetch_enabled")]);
 
   const tab = (href: string, key: string, label: string, emoji: string) => (
@@ -30,10 +34,12 @@ export async function Nav({ active }: { active: "feed" | "discover" | "saved" })
               News Dashboard
             </span>
           </Link>
-          <nav className="flex flex-1 gap-1 sm:flex-none">
+          <nav className="scrollbar-none flex flex-1 gap-1 overflow-x-auto sm:flex-none">
             {tab("/", "feed", "Feed", "📰")}
             {tab("/discover", "discover", "Discover", "✨")}
             {tab("/saved", "saved", "Saved", "🔖")}
+            {tab("/taste", "taste", "You", "📊")}
+            {tab("/search", "search", "", "🔍")}
           </nav>
           <div className="ml-auto">
             <RefreshControls

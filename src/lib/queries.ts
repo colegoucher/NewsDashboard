@@ -1,6 +1,6 @@
 import { and, desc, eq, gt, inArray, notExists, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { items, sources, userActions } from "@/db/schema";
+import { followUpdates, items, sources, storyFollows, userActions } from "@/db/schema";
 import { FEED_WINDOW_DAYS } from "./config";
 import { computeAffinities, scoreItem, scoreItemForDiscover } from "./scoring";
 
@@ -16,7 +16,10 @@ export interface FeedItem {
   sourceId: number;
   contentStatus: string;
   imageUrl: string | null;
+  clusterKey: string | null;
   saved: boolean;
+  /** other outlets covering the same story (cluster collapse) */
+  alsoCoveredBy?: { id: number; sourceName: string }[];
 }
 
 const baseColumns = {
@@ -31,6 +34,7 @@ const baseColumns = {
   sourceName: sources.name,
   contentStatus: items.contentStatus,
   imageUrl: items.imageUrl,
+  clusterKey: items.clusterKey,
 };
 
 function windowStart(): Date {
@@ -65,10 +69,72 @@ export async function getFeed(category?: string): Promise<FeedItem[]> {
 
   const aff = await computeAffinities();
   const savedIds = await getSavedIds(rows.map((r) => r.id));
-  return rows
+  const ranked = rows
     .map((r) => ({ item: { ...r, saved: savedIds.has(r.id) }, score: scoreItem(r, aff) }))
     .sort((a, b) => b.score - a.score)
     .map((s) => s.item);
+
+  // Same-story collapse: the top-ranked item of a cluster represents it;
+  // the rest fold into an "also covered by" list instead of separate cards.
+  const seenClusters = new Map<string, FeedItem>();
+  const collapsed: FeedItem[] = [];
+  for (const item of ranked) {
+    if (!item.clusterKey) {
+      collapsed.push(item);
+      continue;
+    }
+    const primary = seenClusters.get(item.clusterKey);
+    if (!primary) {
+      seenClusters.set(item.clusterKey, item);
+      collapsed.push(item);
+    } else {
+      (primary.alsoCoveredBy ??= []).push({ id: item.id, sourceName: item.sourceName });
+    }
+  }
+  return collapsed;
+}
+
+/** Full-text-ish search over everything ever stored (title + summary + tags). */
+export async function searchItems(query: string): Promise<FeedItem[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const rows = await db
+    .select(baseColumns)
+    .from(items)
+    .innerJoin(sources, eq(items.sourceId, sources.id))
+    .where(
+      sql`(
+        to_tsvector('english', ${items.title} || ' ' || coalesce(${items.summary}, ''))
+          @@ websearch_to_tsquery('english', ${q})
+        or ${items.title} ilike ${"%" + q + "%"}
+      )`
+    )
+    .orderBy(desc(items.publishedAt))
+    .limit(50);
+  const savedIds = await getSavedIds(rows.map((r) => r.id));
+  return rows.map((r) => ({ ...r, saved: savedIds.has(r.id) }));
+}
+
+/** Articles for the catch-me-up chat: everything summarized in the last 36h. */
+export async function getCatchupArticles() {
+  return db
+    .select({
+      id: items.id,
+      title: items.title,
+      category: items.category,
+      summary: items.summary,
+      sourceName: sources.name,
+    })
+    .from(items)
+    .innerJoin(sources, eq(items.sourceId, sources.id))
+    .where(
+      and(
+        sql`${items.publishedAt} > now() - interval '36 hours'`,
+        sql`${items.summary} is not null`
+      )
+    )
+    .orderBy(desc(items.publishedAt))
+    .limit(150);
 }
 
 export async function getDiscoverCandidates(): Promise<FeedItem[]> {
@@ -144,6 +210,62 @@ export async function getActiveCategories(): Promise<string[]> {
     .from(items)
     .where(and(gt(items.publishedAt, windowStart()), sql`${items.category} is not null`));
   return rows.map((r) => r.category!).sort();
+}
+
+// ---- "Whatever happened to...?" follows ----
+
+export interface FollowUpdate {
+  updateId: number;
+  note: string | null;
+  updateItemId: number;
+  updateItemTitle: string;
+  followedTitle: string;
+}
+
+/** Unseen developments on followed stories (shown as a banner on the Feed). */
+export async function getUnseenFollowUpdates(): Promise<FollowUpdate[]> {
+  const followedItem = db.$with("followed").as(
+    db
+      .select({ followId: storyFollows.id, title: items.title })
+      .from(storyFollows)
+      .innerJoin(items, eq(storyFollows.itemId, items.id))
+  );
+  return db
+    .with(followedItem)
+    .select({
+      updateId: followUpdates.id,
+      note: followUpdates.note,
+      updateItemId: followUpdates.itemId,
+      updateItemTitle: items.title,
+      followedTitle: followedItem.title,
+    })
+    .from(followUpdates)
+    .innerJoin(items, eq(followUpdates.itemId, items.id))
+    .innerJoin(followedItem, eq(followUpdates.followId, followedItem.followId))
+    .where(eq(followUpdates.seen, false))
+    .orderBy(desc(followUpdates.createdAt));
+}
+
+/** Stories currently being watched (listed on the Saved page). */
+export async function getFollowing() {
+  return db
+    .select({
+      followId: storyFollows.id,
+      itemId: items.id,
+      title: items.title,
+      createdAt: storyFollows.createdAt,
+    })
+    .from(storyFollows)
+    .innerJoin(items, eq(storyFollows.itemId, items.id))
+    .where(eq(storyFollows.active, true))
+    .orderBy(desc(storyFollows.createdAt));
+}
+
+export async function isFollowing(itemId: number): Promise<boolean> {
+  const row = await db.query.storyFollows.findFirst({
+    where: and(eq(storyFollows.itemId, itemId), eq(storyFollows.active, true)),
+  });
+  return !!row;
 }
 
 export async function getLastRun() {

@@ -60,12 +60,14 @@ async function consumeBudget(): Promise<void> {
 
 // ---- rate limiting (process-local; the pipeline is the only bulk caller) ----
 
-let lastCallAt = 0;
-async function rateLimit(): Promise<void> {
+// Per-model: each model has its own RPM quota, so there's no reason to make
+// a call to model B wait because model A was just tried.
+const lastCallAt = new Map<string, number>();
+async function rateLimit(key: string): Promise<void> {
   const minInterval = Math.ceil(60_000 / GEMINI_MAX_RPM);
-  const wait = lastCallAt + minInterval - Date.now();
+  const wait = (lastCallAt.get(key) ?? 0) + minInterval - Date.now();
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  lastCallAt = Date.now();
+  lastCallAt.set(key, Date.now());
 }
 
 // ---- provider/model fallback chain ----
@@ -174,7 +176,7 @@ async function generate(prompt: string, jsonSchema?: object): Promise<string> {
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       await consumeBudget();
-      await rateLimit();
+      await rateLimit(key);
       try {
         return provider === "gemini"
           ? await callGemini(model, prompt, jsonSchema)
@@ -314,6 +316,142 @@ export async function askAboutArticle(input: {
   ].join("\n");
 
   return generate(prompt);
+}
+
+// ---- Catch-me-up: chat across today's articles ----
+
+const catchupSchema = z.object({
+  answer: z.string(),
+  itemIds: z.array(z.number()),
+});
+
+export async function catchUp(input: {
+  question: string;
+  history: { role: "user" | "assistant"; text: string }[];
+  articles: { id: number; title: string; category: string | null; sourceName: string; summary: string }[];
+}): Promise<{ answer: string; itemIds: number[] }> {
+  const historyBlock = input.history
+    .map((m) => `${m.role === "user" ? "Q" : "A"}: ${m.text}`)
+    .join("\n");
+  const prompt = [
+    `You are the reader's personal news anchor. Answer their question using ONLY the day's article summaries below. Be conversational and concise (a short paragraph or two). If the summaries don't cover it, say so plainly.`,
+    `Also return itemIds: the ids of the articles most relevant to your answer (up to 6), so the UI can link them.`,
+    ``,
+    `Today's articles:`,
+    ...input.articles.map(
+      (a) =>
+        `[id=${a.id}] (${a.sourceName}${a.category ? `, ${a.category}` : ""}) ${a.title} — ${a.summary.slice(0, 500)}`
+    ),
+    ``,
+    historyBlock ? `Previous exchange:\n${historyBlock}\n` : ``,
+    `Question: ${input.question}`,
+  ].join("\n");
+
+  const raw = await generate(prompt, {
+    type: "object",
+    properties: {
+      answer: { type: "string" },
+      itemIds: { type: "array", items: { type: "number" } },
+    },
+    required: ["answer", "itemIds"],
+  });
+  const parsed = catchupSchema.parse(JSON.parse(raw));
+  const valid = new Set(input.articles.map((a) => a.id));
+  return { answer: parsed.answer, itemIds: parsed.itemIds.filter((i) => valid.has(i)).slice(0, 6) };
+}
+
+// ---- Devil's advocate ----
+
+export async function devilsAdvocate(input: { title: string; content: string }): Promise<string> {
+  const prompt = [
+    `Read the article below, then present the strongest honest case AGAINST its central claim, framing, or conclusion — the best version of the opposing view, not a strawman. If the article is neutral reporting, instead surface the strongest critique of the main actor's position or the conventional wisdom in it.`,
+    `2-3 tight paragraphs, plain prose. Intellectually honest: concede what the article gets right.`,
+    ``,
+    `Title: ${input.title}`,
+    input.content.slice(0, 20_000),
+  ].join("\n");
+  return generate(prompt);
+}
+
+// ---- Same-story clustering ----
+
+const clusterSchema = z.object({
+  groups: z.array(z.array(z.number())),
+});
+
+/** Returns groups of item ids that cover the same story (only groups of 2+). */
+export async function clusterStories(
+  articles: { id: number; title: string; sourceName: string }[]
+): Promise<number[][]> {
+  if (articles.length < 2) return [];
+  const prompt = [
+    `Below are news items from different sources. Identify which items cover the SAME underlying story/event (not merely the same broad topic). Return groups as arrays of ids; only include groups with 2 or more items; most items belong to no group.`,
+    ``,
+    ...articles.map((a) => `[id=${a.id}] (${a.sourceName}) ${a.title}`),
+  ].join("\n");
+
+  const raw = await generate(prompt, {
+    type: "object",
+    properties: {
+      groups: { type: "array", items: { type: "array", items: { type: "number" } } },
+    },
+    required: ["groups"],
+  });
+  const valid = new Set(articles.map((a) => a.id));
+  return clusterSchema
+    .parse(JSON.parse(raw))
+    .groups.map((g) => g.filter((id) => valid.has(id)))
+    .filter((g) => g.length >= 2);
+}
+
+// ---- "Whatever happened to...?" follow matching ----
+
+const followMatchSchema = z.object({
+  matches: z.array(
+    z.object({ followId: z.number(), itemId: z.number(), note: z.string() })
+  ),
+});
+
+export async function matchFollowUps(input: {
+  follows: { followId: number; title: string; summary: string }[];
+  newItems: { id: number; title: string }[];
+}): Promise<{ followId: number; itemId: number; note: string }[]> {
+  if (input.follows.length === 0 || input.newItems.length === 0) return [];
+  const prompt = [
+    `The reader is following these ongoing stories, waiting for developments:`,
+    ...input.follows.map(
+      (f) => `[followId=${f.followId}] ${f.title} — ${f.summary.slice(0, 300)}`
+    ),
+    ``,
+    `Below are today's NEW articles. Identify any that are a genuine development/update of a followed story (same specific saga — not just the same topic). Usually there are none; be strict.`,
+    ...input.newItems.map((n) => `[itemId=${n.id}] ${n.title}`),
+    ``,
+    `For each match, write note: one sentence telling the reader what developed ("The verdict came in: ...").`,
+  ].join("\n");
+
+  const raw = await generate(prompt, {
+    type: "object",
+    properties: {
+      matches: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            followId: { type: "number" },
+            itemId: { type: "number" },
+            note: { type: "string" },
+          },
+          required: ["followId", "itemId", "note"],
+        },
+      },
+    },
+    required: ["matches"],
+  });
+  const validFollows = new Set(input.follows.map((f) => f.followId));
+  const validItems = new Set(input.newItems.map((n) => n.id));
+  return followMatchSchema
+    .parse(JSON.parse(raw))
+    .matches.filter((m) => validFollows.has(m.followId) && validItems.has(m.itemId));
 }
 
 // ---- Discover taste reasoning ----

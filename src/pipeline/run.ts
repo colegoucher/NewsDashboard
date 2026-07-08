@@ -1,7 +1,7 @@
 import "dotenv/config";
-import { and, eq, isNull, lt, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, notInArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { fetchRuns, items, sources, userActions } from "@/db/schema";
+import { fetchRuns, followUpdates, items, sources, storyFollows, userActions } from "@/db/schema";
 import {
   FETCH_LIMIT_PER_SOURCE,
   RAW_CONTENT_RETENTION_DAYS,
@@ -10,7 +10,12 @@ import {
 } from "@/lib/config";
 import { canonicalizeUrl } from "@/lib/canonical-url";
 import { extractArticle } from "@/lib/extract";
-import { BudgetExceededError, summarizeBatch } from "@/lib/gemini";
+import {
+  BudgetExceededError,
+  clusterStories,
+  matchFollowUps,
+  summarizeBatch,
+} from "@/lib/gemini";
 import { getSetting } from "@/lib/settings";
 import { SOURCE_FETCHERS } from "@/sources";
 
@@ -31,6 +36,7 @@ async function main() {
 
   const [run] = await db.insert(fetchRuns).values({ trigger }).returning({ id: fetchRuns.id });
   const errors: string[] = [];
+  const newItemIds: number[] = [];
   let fetched = 0;
   let summarized = 0;
 
@@ -73,6 +79,7 @@ async function main() {
             .onConflictDoNothing({ target: [items.sourceId, items.externalId] })
             .returning({ id: items.id });
           fetched += inserted.length;
+          if (inserted[0]) newItemIds.push(inserted[0].id);
         }
         console.log(`fetched ${source.name}`);
       } catch (e) {
@@ -154,6 +161,84 @@ async function main() {
       }
     }
     console.log(`phase 3 done: ${summarized} items summarized`);
+
+    // ---- phase 3.5: same-story clustering (one AI call over recent titles) ----
+    try {
+      const recent = await db
+        .select({
+          id: items.id,
+          title: items.title,
+          clusterKey: items.clusterKey,
+          sourceName: sources.name,
+        })
+        .from(items)
+        .innerJoin(sources, eq(items.sourceId, sources.id))
+        .where(
+          and(
+            sql`${items.publishedAt} > now() - interval '48 hours'`,
+            sql`${items.summary} is not null`
+          )
+        );
+      if (recent.length >= 2) {
+        const groups = await clusterStories(
+          recent.map((r) => ({ id: r.id, title: r.title, sourceName: r.sourceName }))
+        );
+        for (const group of groups) {
+          const existing = recent.find((r) => group.includes(r.id) && r.clusterKey);
+          const key = existing?.clusterKey ?? `c${Math.min(...group)}`;
+          await db.update(items).set({ clusterKey: key }).where(inArray(items.id, group));
+        }
+        console.log(`phase 3.5 done: ${groups.length} story clusters`);
+      }
+    } catch (e) {
+      if (!(e instanceof BudgetExceededError)) {
+        errors.push(`clustering: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    // ---- phase 3.6: check followed stories for developments ----
+    try {
+      const follows = await db
+        .select({
+          followId: storyFollows.id,
+          title: items.title,
+          summary: items.summary,
+        })
+        .from(storyFollows)
+        .innerJoin(items, eq(storyFollows.itemId, items.id))
+        .where(
+          and(
+            eq(storyFollows.active, true),
+            sql`${storyFollows.createdAt} > now() - interval '60 days'`
+          )
+        );
+      if (follows.length > 0 && newItemIds.length > 0) {
+        const fresh = await db.query.items.findMany({
+          where: (t, { inArray }) => inArray(t.id, newItemIds),
+          columns: { id: true, title: true },
+        });
+        const matches = await matchFollowUps({
+          follows: follows.map((f) => ({
+            followId: f.followId,
+            title: f.title,
+            summary: f.summary ?? "",
+          })),
+          newItems: fresh,
+        });
+        for (const m of matches) {
+          await db.insert(followUpdates).values({
+            followId: m.followId,
+            itemId: m.itemId,
+            note: m.note,
+          });
+        }
+        if (matches.length) console.log(`phase 3.6: ${matches.length} follow-up(s) found`);
+      }
+    } catch (e) {
+      if (!(e instanceof BudgetExceededError)) {
+        errors.push(`follow matching: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
 
     // ---- phase 4: retention — prune old raw text, keep saved items ----
     const cutoff = new Date(Date.now() - RAW_CONTENT_RETENTION_DAYS * 24 * 3600 * 1000);

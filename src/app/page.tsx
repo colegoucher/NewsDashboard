@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { CatchupChat } from "@/components/catchup-chat";
+import { FollowUpdates } from "@/components/follow-updates";
 import { ItemCard } from "@/components/item-card";
 import { Nav } from "@/components/nav";
-import { getActiveCategories, getFeed } from "@/lib/queries";
+import { getActiveCategories, getFeed, getUnseenFollowUpdates } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +13,11 @@ export default async function FeedPage({
   searchParams: Promise<{ category?: string }>;
 }) {
   const { category } = await searchParams;
-  const [feed, categories] = await Promise.all([getFeed(category), getActiveCategories()]);
+  const [feed, categories, updates] = await Promise.all([
+    getFeed(category),
+    getActiveCategories(),
+    getUnseenFollowUpdates(),
+  ]);
 
   const [top, ...rest] = feed;
 
@@ -19,6 +25,8 @@ export default async function FeedPage({
     <>
       <Nav active="feed" />
       <main className="mx-auto max-w-3xl px-3 py-4 sm:px-4 sm:py-6">
+        <FollowUpdates updates={updates} />
+        <CatchupChat />
         <div className="scrollbar-none -mx-3 mb-4 flex gap-1.5 overflow-x-auto px-3 pb-1 sm:mx-0 sm:flex-wrap sm:px-0">
           <CategoryTab href="/" label="All" active={!category} />
           {categories.map((c) => (

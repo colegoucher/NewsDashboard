@@ -38,7 +38,10 @@ export function ItemCard({
           </div>
         </Link>
         <div className="px-4 pb-4 sm:px-5">
-          <ActionButtons itemId={item.id} saved={item.saved} refreshOnAction={refreshOnAction} />
+          <AlsoCoveredBy item={item} />
+          <div className="mt-2">
+            <ActionButtons itemId={item.id} saved={item.saved} refreshOnAction={refreshOnAction} />
+          </div>
         </div>
       </article>
     );
@@ -69,10 +72,31 @@ export function ItemCard({
       {reason && (
         <p className="mt-2 text-xs italic text-indigo-600 dark:text-indigo-400">{reason}</p>
       )}
+      <AlsoCoveredBy item={item} />
       <div className="mt-2.5">
         <ActionButtons itemId={item.id} saved={item.saved} refreshOnAction={refreshOnAction} />
       </div>
     </article>
+  );
+}
+
+function AlsoCoveredBy({ item }: { item: FeedItem }) {
+  if (!item.alsoCoveredBy || item.alsoCoveredBy.length === 0) return null;
+  return (
+    <p className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
+      <span className="rounded-full bg-violet-100 px-2 py-0.5 font-medium text-violet-800 dark:bg-violet-500/15 dark:text-violet-300">
+        📣 Big story
+      </span>
+      also covered by{" "}
+      {item.alsoCoveredBy.map((c, i) => (
+        <span key={c.id}>
+          <Link href={`/item/${c.id}`} className="underline underline-offset-2 hover:text-stone-700 dark:hover:text-stone-200">
+            {c.sourceName}
+          </Link>
+          {i < item.alsoCoveredBy!.length - 1 ? "," : ""}
+        </span>
+      ))}
+    </p>
   );
 }
 

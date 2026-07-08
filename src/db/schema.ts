@@ -38,6 +38,7 @@ export const items = pgTable(
     category: text("category"),
     tags: jsonb("tags").$type<string[]>(),
     imageUrl: text("image_url"),
+    clusterKey: text("cluster_key"), // same story covered by multiple outlets
   },
   (t) => [
     uniqueIndex("items_source_external_unique").on(t.sourceId, t.externalId),
@@ -68,6 +69,30 @@ export const fetchRuns = pgTable("fetch_runs", {
   itemsFetched: integer("items_fetched").notNull().default(0),
   itemsSummarized: integer("items_summarized").notNull().default(0),
   error: text("error"),
+});
+
+// "Whatever happened to...?" — stories the user chose to follow; the pipeline
+// watches future fetches for developments.
+export const storyFollows = pgTable("story_follows", {
+  id: serial("id").primaryKey(),
+  itemId: integer("item_id")
+    .notNull()
+    .references(() => items.id),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const followUpdates = pgTable("follow_updates", {
+  id: serial("id").primaryKey(),
+  followId: integer("follow_id")
+    .notNull()
+    .references(() => storyFollows.id),
+  itemId: integer("item_id")
+    .notNull()
+    .references(() => items.id),
+  note: text("note"), // one-line AI description of the development
+  seen: boolean("seen").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const settings = pgTable("settings", {

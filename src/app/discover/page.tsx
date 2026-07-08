@@ -3,9 +3,11 @@ import { Nav } from "@/components/nav";
 import { AddTopic } from "@/components/add-topic";
 import { AiPicksSection } from "@/components/ai-picks";
 import { SourceSuggestions } from "@/components/source-suggestions";
+import { TopicSuggestions } from "@/components/topic-suggestions";
 import { getDiscoverCandidates } from "@/lib/queries";
 import { getSetting } from "@/lib/settings";
 import { getSourceSuggestions } from "@/lib/suggest-sources";
+import { getTopicSuggestions } from "@/lib/suggest-topics";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +17,10 @@ export interface CachedPicks {
 }
 
 export default async function DiscoverPage() {
-  const [candidates, sourceSuggestions] = await Promise.all([
+  const [candidates, sourceSuggestions, topicSuggestions] = await Promise.all([
     getDiscoverCandidates(),
     getSourceSuggestions(),
+    getTopicSuggestions(),
   ]);
 
   const cachedRaw = await getSetting(`discover_picks_${new Date().toISOString().slice(0, 10)}`);
@@ -33,6 +36,7 @@ export default async function DiscoverPage() {
       <Nav active="discover" />
       <main className="mx-auto max-w-3xl px-4 py-6">
         <AddTopic />
+        <TopicSuggestions suggestions={topicSuggestions} />
         <SourceSuggestions suggestions={sourceSuggestions} />
         <AiPicksSection hasPicks={aiPicks.length > 0}>
           {aiPicks.map(({ item, reason }) => (

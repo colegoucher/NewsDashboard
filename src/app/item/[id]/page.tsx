@@ -4,8 +4,9 @@ import { db } from "@/db";
 import { userActions } from "@/db/schema";
 import { ActionButtons } from "@/components/action-buttons";
 import { AskAi } from "@/components/ask-ai";
+import { DevilsAdvocate, FollowButton } from "@/components/item-tools";
 import { categoryColor } from "@/lib/category-colors";
-import { getItem } from "@/lib/queries";
+import { getItem, isFollowing } from "@/lib/queries";
 import { and, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -26,9 +27,12 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
     await db.insert(userActions).values({ itemId: id, actionType: "read" });
   }
 
-  const savedRow = await db.query.userActions.findFirst({
-    where: and(eq(userActions.itemId, id), eq(userActions.actionType, "save")),
-  });
+  const [savedRow, following] = await Promise.all([
+    db.query.userActions.findFirst({
+      where: and(eq(userActions.itemId, id), eq(userActions.actionType, "save")),
+    }),
+    isFollowing(id),
+  ]);
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-6 sm:py-8">
@@ -66,8 +70,9 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
           {item.title}
         </h1>
 
-        <div className="mt-4">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
           <ActionButtons itemId={item.id} saved={!!savedRow} showDismiss={false} />
+          <FollowButton itemId={item.id} following={following} />
         </div>
 
         {item.contentStatus !== "full" && (
@@ -106,6 +111,8 @@ export default async function ItemPage({ params }: { params: Promise<{ id: strin
         >
           Read the original ↗
         </a>
+
+        <DevilsAdvocate itemId={item.id} />
       </article>
 
       <hr className="my-8 border-stone-200 dark:border-stone-800" />

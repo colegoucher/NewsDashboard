@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { sources } from "@/db/schema";
 import { addCategory } from "@/lib/categories";
+import { getSetting, setSetting } from "@/lib/settings";
 
 const bodySchema = z.object({
   topic: z
@@ -12,6 +13,7 @@ const bodySchema = z.object({
     .min(2)
     .max(40)
     .regex(/^[\p{L}\p{N} &'-]+$/u, "letters, numbers and spaces only"),
+  action: z.enum(["add", "ignore"]).default("add"),
 });
 
 // Creates a topic: a new category (the summarizer starts using it) plus a
@@ -21,6 +23,14 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid topic name" }, { status: 400 });
   }
+  if (parsed.data.action === "ignore") {
+    const raw = await getSetting("ignored_topic_suggestions");
+    const ignored: string[] = raw ? JSON.parse(raw) : [];
+    if (!ignored.includes(parsed.data.topic)) ignored.push(parsed.data.topic);
+    await setSetting("ignored_topic_suggestions", JSON.stringify(ignored));
+    return NextResponse.json({ ok: true });
+  }
+
   // Title Case for the category/tab label.
   const topic = parsed.data.topic
     .split(/\s+/)
