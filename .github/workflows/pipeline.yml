@@ -2,12 +2,13 @@ name: pipeline
 
 on:
   schedule:
-    # ~8am America/New_York: 12:00 UTC (EDT) and 13:00 UTC (EST). Both slots
-    # run; the pipeline itself skips if another run succeeded within 3 hours,
+    # ~7am America/New_York (6am in winter): 11:00 and 12:00 UTC. Both slots
+    # run; the pipeline itself skips if another run started within 3 hours,
     # so whichever fires first wins and GitHub's cron delays can't cause a
-    # missed morning (a strict clock gate did exactly that once).
+    # missed morning (a strict clock gate did exactly that once). Scheduled
+    # early so even a delayed run has the paper ready by ~8am.
+    - cron: "0 11 * * *"
     - cron: "0 12 * * *"
-    - cron: "0 13 * * *"
   workflow_dispatch:
 
 jobs:
