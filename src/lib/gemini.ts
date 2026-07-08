@@ -11,6 +11,7 @@ import {
   GROQ_MODELS,
 } from "./config";
 import { getCategories } from "./categories";
+import { getSetting, setSetting } from "./settings";
 
 // All Gemini access goes through this module: one place for rate limiting,
 // the daily budget, the model fallback chain, and provider swap if the free
@@ -127,12 +128,46 @@ async function callGroq(model: string, prompt: string, jsonSchema?: object): Pro
   return text;
 }
 
-// Process-local; a fresh pipeline run re-probes all models.
+// Which models are dead for the day. Persisted in the DB (not just process
+// memory): serverless invocations start cold, and re-probing four exhausted
+// models with polite delays on every Ask-AI request was slow enough to hit
+// Vercel's function timeout.
 const modelState = new Map<string, "exhausted" | "unavailable">();
+let modelStateDay: string | null = null;
+
+function exhaustedKey(): string {
+  return `llm_exhausted_${new Date().toISOString().slice(0, 10)}`;
+}
+
+async function loadModelState(): Promise<void> {
+  const day = new Date().toISOString().slice(0, 10);
+  if (modelStateDay === day) return;
+  modelStateDay = day;
+  modelState.clear();
+  const raw = await getSetting(exhaustedKey());
+  if (raw) {
+    for (const key of JSON.parse(raw) as string[]) modelState.set(key, "exhausted");
+  }
+}
+
+async function markDead(key: string, why: "exhausted" | "unavailable"): Promise<void> {
+  modelState.set(key, why);
+  try {
+    const raw = await getSetting(exhaustedKey());
+    const list: string[] = raw ? JSON.parse(raw) : [];
+    if (!list.includes(key)) {
+      list.push(key);
+      await setSetting(exhaustedKey(), JSON.stringify(list));
+    }
+  } catch {
+    // persistence is an optimization; the in-memory mark still applies
+  }
+}
 
 const MAX_RETRIES = 3;
 
 async function generate(prompt: string, jsonSchema?: object): Promise<string> {
+  await loadModelState();
   for (const { provider, model } of providerChain()) {
     const key = `${provider}:${model}`;
     if (modelState.has(key)) continue;
@@ -149,13 +184,13 @@ async function generate(prompt: string, jsonSchema?: object): Promise<string> {
 
         // Daily quota spent for this model -> mark it and move down the chain.
         if (/PerDay|per day|RPD|TPD/i.test(msg)) {
-          modelState.set(key, "exhausted");
+          await markDead(key, "exhausted");
           console.log(`llm: ${key} daily quota exhausted, trying next`);
           break;
         }
-        // Model doesn't exist (retired/renamed) -> skip it permanently this run.
+        // Model doesn't exist (retired/renamed) -> skip it for the day.
         if (/NOT_FOUND|404|model_not_found|decommissioned/i.test(msg)) {
-          modelState.set(key, "unavailable");
+          await markDead(key, "unavailable");
           console.log(`llm: ${key} not available, trying next`);
           break;
         }

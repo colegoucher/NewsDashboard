@@ -58,6 +58,12 @@ export async function POST(req: NextRequest) {
         { status: 429 }
       );
     }
-    throw e;
+    // Never let the UI fall back to a bare "Something went wrong".
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("ask-ai failed:", msg);
+    return NextResponse.json(
+      { error: `AI call failed (${msg.slice(0, 120)}) — try again in a moment.` },
+      { status: 502 }
+    );
   }
 }
