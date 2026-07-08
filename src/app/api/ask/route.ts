@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { items } from "@/db/schema";
-import { extractArticle } from "@/lib/extract";
 import { askAboutArticle, BudgetExceededError } from "@/lib/gemini";
 
 const bodySchema = z.object({
@@ -28,15 +27,26 @@ export async function POST(req: NextRequest) {
   if (!item) return NextResponse.json({ error: "item not found" }, { status: 404 });
 
   // Raw text may have been pruned by retention — re-fetch on demand.
+  // jsdom (inside extract) is imported lazily and failures degrade to the
+  // summary: the common path must never depend on it initializing on Vercel.
   let content = item.rawContent;
   let contentStatus = item.contentStatus;
   if (!content) {
-    const result = await extractArticle(item.url);
-    if (result.text) {
-      content = result.text;
-      contentStatus = "full";
-      await db.update(items).set({ rawContent: result.text, contentStatus: "full" }).where(eq(items.id, itemId));
-    } else {
+    try {
+      const { extractArticle } = await import("@/lib/extract");
+      const result = await extractArticle(item.url);
+      if (result.text) {
+        content = result.text;
+        contentStatus = "full";
+        await db
+          .update(items)
+          .set({ rawContent: result.text, contentStatus: "full" })
+          .where(eq(items.id, itemId));
+      }
+    } catch (e) {
+      console.error("ask-ai refetch failed:", e instanceof Error ? e.message : e);
+    }
+    if (!content) {
       content = item.summary ?? item.title;
       contentStatus = "failed";
     }
