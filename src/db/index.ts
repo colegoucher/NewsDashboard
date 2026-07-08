@@ -9,7 +9,15 @@ function createDb() {
   if (!url) throw new Error("DATABASE_URL is not set");
   // prepare: false is required for Supabase's transaction-mode pooler (port 6543),
   // which is what serverless deployments should connect through.
-  const client = postgres(url, { prepare: false, max: 5 });
+  // Aggressive idle/connect timeouts: a reused lambda holding a connection the
+  // pooler already closed would otherwise hang page renders until the 504.
+  const client = postgres(url, {
+    prepare: false,
+    max: 5,
+    idle_timeout: 20, // seconds; drop idle sockets before the pooler does
+    connect_timeout: 10,
+    max_lifetime: 60 * 30,
+  });
   return drizzle(client, { schema });
 }
 
