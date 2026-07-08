@@ -32,6 +32,19 @@ async function main() {
       console.log("auto_fetch_enabled=false — skipping scheduled run");
       process.exit(0);
     }
+    // Idempotence guard: both cron slots (and delayed firings) call this;
+    // only the first to arrive each morning should do the work.
+    const recent = await db.query.fetchRuns.findFirst({
+      where: (t, { and: andW, gt: gtW, inArray: inW }) =>
+        andW(
+          gtW(t.startedAt, new Date(Date.now() - 3 * 3600 * 1000)),
+          inW(t.status, ["running", "success", "partial"])
+        ),
+    });
+    if (recent) {
+      console.log(`run ${recent.id} already started ${recent.startedAt.toISOString()} — skipping`);
+      process.exit(0);
+    }
   }
 
   const [run] = await db.insert(fetchRuns).values({ trigger }).returning({ id: fetchRuns.id });
