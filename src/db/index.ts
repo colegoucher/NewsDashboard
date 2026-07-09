@@ -5,20 +5,18 @@ import * as schema from "./schema";
 type Db = ReturnType<typeof createDb>;
 
 function createDb() {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL is not set");
-  // prepare: false is required for Supabase's transaction-mode pooler (port 6543),
-  // which is what serverless deployments should connect through.
-  // Aggressive idle/connect timeouts: a reused lambda holding a connection the
-  // pooler already closed would otherwise hang page renders until the 504.
-  // max: 1 — Supabase's recommendation for transaction pooler + serverless.
-  // Every extra pooled socket is another chance to get wedged on a
-  // half-closed connection; one connection serializes queries (fine at our
-  // volume) and fails fast + reconnects when the socket dies.
+  const raw = process.env.DATABASE_URL;
+  if (!raw) throw new Error("DATABASE_URL is not set");
+  // Use the SESSION pooler (port 5432 on the same pooler host) instead of the
+  // transaction pooler (6543). Transaction mode wedged intermittently when a
+  // page fired many concurrent queries over few sockets (/taste 504s); session
+  // mode handles pipelined queries correctly. Verified 7-way concurrent on one
+  // connection in ~800ms. idle_timeout keeps session slots free between hits.
+  const url = raw.replace(":6543/", ":5432/");
   const client = postgres(url, {
     prepare: false,
-    max: 1,
-    idle_timeout: 20, // seconds; drop idle sockets before the pooler does
+    max: 2,
+    idle_timeout: 20, // seconds; releases the session slot quickly when idle
     connect_timeout: 10,
     max_lifetime: 60 * 30,
   });
