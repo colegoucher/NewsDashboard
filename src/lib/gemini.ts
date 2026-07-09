@@ -303,7 +303,7 @@ export async function askAboutArticle(input: {
     .map((m) => `${m.role === "user" ? "Q" : "A"}: ${m.text}`)
     .join("\n");
   const prompt = [
-    `You are answering questions about a news article for its reader. Answer from the article text below. If the answer isn't in the text, say so plainly — do not invent details.`,
+    `You are answering questions about a news article for its reader. Ground your answer in the article text below whenever it contains the answer. When the question goes beyond the article (background, related context, "how does this connect to..."), answer from your general knowledge — but keep the two clearly separated: attribute article facts to the article, and introduce outside context with a phrase like "Beyond the article:". Never present a guess as fact; if you genuinely don't know, say so. You cannot browse the web, so recent events outside this article may be beyond your knowledge.`,
     input.contentStatus !== "full"
       ? `NOTE: only a partial excerpt of the article is available; caveat answers accordingly.`
       : ``,
