@@ -2,14 +2,19 @@ name: pipeline
 
 on:
   schedule:
-    # ~7am America/New_York (6am in winter): 11:00 and 12:00 UTC. Both slots
-    # run; the pipeline itself skips if another run started within 3 hours,
-    # so whichever fires first wins and GitHub's cron delays can't cause a
-    # missed morning (a strict clock gate did exactly that once). Scheduled
-    # early so even a delayed run has the paper ready by ~8am.
-    - cron: "0 11 * * *"
-    - cron: "0 12 * * *"
+    # ~7am America/New_York (6am in winter). Odd minutes on purpose: GitHub
+    # drops on-the-hour crons under load (it skipped two mornings straight).
+    # Vercel cron (vercel.json -> /api/cron) is an independent backup
+    # scheduler; the pipeline's 3h idempotence guard makes any combination
+    # of firings safe.
+    - cron: "23 11 * * *"
+    - cron: "41 12 * * *"
   workflow_dispatch:
+    inputs:
+      manual:
+        description: manual semantics (skip the 3h idempotence guard)
+        default: "true"
+        type: string
 
 jobs:
   run:
@@ -27,7 +32,9 @@ jobs:
         run: npm ci
 
       - name: Run pipeline
-        run: npx tsx src/pipeline/run.ts ${{ github.event_name == 'workflow_dispatch' && '--manual' || '' }}
+        # Refresh button = manual (always runs). Vercel cron dispatches with
+        # manual=false so it gets scheduled semantics (idempotence + toggle).
+        run: npx tsx src/pipeline/run.ts ${{ (github.event_name == 'workflow_dispatch' && inputs.manual != 'false') && '--manual' || '' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

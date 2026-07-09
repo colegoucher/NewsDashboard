@@ -13,6 +13,7 @@ export default async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  // Everything is behind auth except the login page/endpoint and static assets.
-  matcher: ["/((?!login|api/login|_next/static|_next/image|favicon.ico).*)"],
+  // Everything is behind auth except the login page/endpoint, the Vercel
+  // cron hook (verifies its own caller), and static assets.
+  matcher: ["/((?!login|api/login|api/cron|_next/static|_next/image|favicon.ico).*)"],
 };
