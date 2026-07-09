@@ -3,6 +3,7 @@ import { categoryColor } from "@/lib/category-colors";
 import { tasteReport } from "@/lib/taste";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30; // fail fast instead of zombie-hanging on a wedged connection
 
 export default async function TastePage() {
   const report = await tasteReport();

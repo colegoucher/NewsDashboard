@@ -6,6 +6,7 @@ import { Nav } from "@/components/nav";
 import { getActiveCategories, getFeed, getUnseenFollowUpdates } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30; // fail fast instead of zombie-hanging on a wedged connection
 
 export default async function FeedPage({
   searchParams,

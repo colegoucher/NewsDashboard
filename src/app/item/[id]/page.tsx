@@ -10,6 +10,7 @@ import { getItem, isFollowing } from "@/lib/queries";
 import { and, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30; // fail fast instead of zombie-hanging on a wedged connection
 
 export default async function ItemPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: idRaw } = await params;

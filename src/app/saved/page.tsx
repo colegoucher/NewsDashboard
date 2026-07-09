@@ -4,6 +4,7 @@ import { Nav } from "@/components/nav";
 import { getFollowing, getSaved } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30; // fail fast instead of zombie-hanging on a wedged connection
 
 export default async function SavedPage() {
   const [saved, following] = await Promise.all([getSaved(), getFollowing()]);

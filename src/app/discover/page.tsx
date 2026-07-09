@@ -10,6 +10,7 @@ import { getSourceSuggestions } from "@/lib/suggest-sources";
 import { getTopicSuggestions } from "@/lib/suggest-topics";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30; // fail fast instead of zombie-hanging on a wedged connection
 
 export interface CachedPicks {
   generatedAt: string;
